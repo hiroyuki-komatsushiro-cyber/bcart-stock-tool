@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Bカート在庫更新ツール</title>
+<style>
+  body { font-family: "Segoe UI", "Yu Gothic UI", sans-serif; margin: 24px; background: #f5f6f8; color: #222; max-width: 1080px; }
+  h1 { font-size: 20px; margin-bottom: 4px; }
+  .card { background: #fff; border-radius: 8px; padding: 16px 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  label { display: block; font-weight: 600; margin: 10px 0 4px; font-size: 13px; }
+  input[type=file] { width: 100%; box-sizing: border-box; padding: 8px; border: 1px solid #ccc; border-radius: 4px; font-size: 13px; background: #fafafa; }
+  input[type=text], input[type=number], select, textarea { font-family: inherit; font-size: 13px; padding: 5px 7px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+  textarea { width: 100%; resize: vertical; line-height: 1.5; }
+  button { padding: 9px 22px; border: none; border-radius: 5px; font-size: 14px; cursor: pointer; margin-right: 10px; margin-top: 14px; }
+  #btnRun { background: #2b6cb0; color: #fff; }
+  .btnDownload { background: #2f855a; color: #fff; }
+  .btnSub { background: #e2e8f0; color: #2d3748; font-size: 13px; padding: 7px 16px; }
+  button:disabled { opacity: .5; cursor: default; }
+  table { border-collapse: collapse; width: 100%; font-size: 12.5px; margin-top: 8px; }
+  th, td { border: 1px solid #ddd; padding: 4px 8px; text-align: left; }
+  th { background: #edf2f7; position: sticky; top: 0; }
+  .num { text-align: right; }
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 10px; font-size: 12px; font-weight: 600; margin-right: 6px; }
+  .b-ok { background: #c6f6d5; color: #22543d; }
+  .b-warn { background: #fefcbf; color: #744210; }
+  .b-miss { background: #fed7d7; color: #742a2a; }
+  .b-info { background: #e2e8f0; color: #4a5568; }
+  #msg { margin-top: 10px; font-size: 13px; white-space: pre-wrap; }
+  .err { color: #c53030; font-weight: 600; }
+  .hint { color: #666; font-size: 12px; margin-top: 4px; }
+  .notice { background: #ebf8ff; border: 1px solid #bee3f8; color: #2c5282; padding: 10px 14px; border-radius: 6px; font-size: 12.5px; margin-bottom: 16px; }
+  .warnbox { background: #fffaf0; border: 1px solid #fbd38d; color: #744210; padding: 10px 14px; border-radius: 6px; font-size: 12.5px; margin: 10px 0; }
+  h3 { font-size: 14px; margin: 18px 0 4px; }
+  details > summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+  .grid { display: grid; grid-template-columns: 180px 1fr; gap: 6px 12px; align-items: center; margin-top: 8px; }
+  .grid span { font-size: 12.5px; color: #444; }
+  .edited { background: #fffbe6; font-weight: 600; }
+  .scroll { max-height: 560px; overflow: auto; }
+  tr.changed td.newv { background: #f0fff4; }
+  tr.nomatch { background: #fff5f5; }
+</style>
+</head>
+<body>
+<h1>Bカート在庫更新ツール</h1>
+<div class="notice">
+  このページは<b>ブラウザの中だけ</b>で動作します。アップロードしたファイルの内容はどこにも送信・保存されません。
+  設定（掛け率・定番品）はこのブラウザにだけ保存されます。
+</div>
+
+<div class="card">
+  <details id="setupBox">
+    <summary>設定（初回だけ入力してください）<span id="setupState" class="hint"></span></summary>
+    <div class="grid">
+      <span>掛け率（定番品）</span>
+      <span><input type="number" id="ratio" min="1" max="100" step="1" style="width:80px"> ％ &nbsp;<span class="hint">在庫切れ防止の余裕。定番品だけに掛かります</span></span>
+      <span>対象の保管場所</span>
+      <span><input type="text" id="locations" style="width:100%"></span>
+      <span style="align-self:start">定番品の品番<br><span class="hint">掛け率を掛ける対象</span></span>
+      <span><textarea id="teiban" rows="5" placeholder="1行に1つずつ品番を貼り付け"></textarea></span>
+    </div>
+    <div class="hint">※ ここに無い品番は掛け率を掛けず、フリー在庫をそのまま反映します（現在のスプレッドシートと同じ挙動です）</div>
+    <button class="btnSub" onclick="saveSettings()">設定を保存</button>
+    <button class="btnSub" onclick="makeShareLink()">設定入りリンクを作る</button>
+    <span id="setupMsg" class="hint"></span>
+    <div class="hint">「設定入りリンク」を渡すと、受け取った人は開くだけで同じ設定になります
+      （設定はリンクの中に入っていて、どこかのサーバーに送られることはありません）。</div>
+  </details>
+</div>
+
+<div class="card">
+  <label>① BrewtopeHub の在庫データ（エクスポートしたファイル／.csv・.xlsx）</label>
+  <input type="file" id="hubFile" accept=".csv,.xlsx,.xlsm">
+  <label>② Bカートの商品データ（商品一覧＞CSVエクスポート＞全項目／.csv・.xlsx）</label>
+  <input type="file" id="bcartFile" accept=".csv,.xlsx,.xlsm">
+  <div id="mapArea"></div>
+  <button id="btnRun" onclick="run()">在庫を計算する</button>
+  <div id="msg"></div>
+</div>
+
+<div id="result"></div>
+
+<script src="vendor/xlsx.full.min.js"></script>
+<script>
+/* ===========================================================
+   計算ロジックの出典（スプレッドシート「Bカート在庫UP」の実際の数式）
+     S列 =SUMIF(照合!A:A, A, 照合!K:K)            品番ごとに在庫を合算
+     U列 =IFERROR(IFS(COUNTIF(定番品!A:A,A)>0, ROUNDDOWN(S*0.7,0)), ROUNDDOWN(S,0))
+          → 定番品なら掛け率、それ以外は100%。どちらも切り捨て
+     V列 =IFS(LEFT(A,1)="4",A, "7"→A&"b", "9"→A&"b",
+              MID(A,5,1)が 0/1/8 →A&"b"、3/4/5→A)   在庫実体の品番へ変換
+     W列 =U                                        出力する在庫数
+   フリー在庫 = 出荷可能在庫 − 取り置き在庫（最新在庫調整シート R列 =K-Q）
+   =========================================================== */
+
+const LS_KEY = "bcart_stock_tool_v1";
+const DEFAULTS = {
+  ratio: 70,
+  locations: "ピッキングエリア, ﾊﾞﾗ在庫ﾋﾟｯｷﾝｸﾞA",
+  teiban: "",
+  map: {}
+};
+let settings = loadSettings();
+let state = null;   // 計算結果
+
+/* ---------- 設定 ---------- */
+function loadSettings() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (raw) return Object.assign({}, DEFAULTS, JSON.parse(raw));
+  } catch (e) { /* 壊れていたら既定値に戻す */ }
+  return Object.assign({}, DEFAULTS);
+}
+function persist() {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(settings)); } catch (e) {}
+}
+function saveSettings() {
+  const r = parseInt(document.getElementById("ratio").value, 10);
+  settings.ratio = (r >= 1 && r <= 100) ? r : DEFAULTS.ratio;
+  settings.locations = document.getElementById("locations").value;
+  settings.teiban = document.getElementById("teiban").value;
+  persist();
+  document.getElementById("setupMsg").textContent = "保存しました（" + teibanList().length + "品目・" + settings.ratio + "％）";
+  refreshSetupState();
+}
+function teibanList() {
+  return (settings.teiban || "").split(/[\r\n,\t]+/).map(s => s.trim()).filter(Boolean);
+}
+function locationList() {
+  return (settings.locations || "").split(/[,\t]+/).map(s => s.trim()).filter(Boolean);
+}
+/* 設定をリンクに載せて渡す。
+   このツールは外部の方にも使っていただく前提で、設定はブラウザごとの保存になる。
+   毎回手で貼ってもらうと間違いのもとなので、URLの # 以降に載せて渡せるようにした。
+   # 以降はサーバーに送信されない（GitHub Pages側にも残らない）。 */
+function b64enc(s) { return btoa(Array.from(new TextEncoder().encode(s), c => String.fromCharCode(c)).join("")); }
+function b64dec(b) { return new TextDecoder().decode(Uint8Array.from(atob(b), c => c.charCodeAt(0))); }
+
+function makeShareLink() {
+  saveSettings();
+  const cfg = { ratio: settings.ratio, locations: settings.locations, teiban: settings.teiban };
+  const url = location.origin + location.pathname + "#cfg=" + encodeURIComponent(b64enc(JSON.stringify(cfg)));
+  navigator.clipboard.writeText(url).then(
+    () => { document.getElementById("setupMsg").textContent = "設定入りリンクをコピーしました。担当の方に送ってください。"; },
+    () => { window.prompt("このリンクを担当の方に送ってください", url); });
+}
+
+function applyLinkSettings() {
+  const m = location.hash.match(/^#cfg=(.+)$/);
+  if (!m) return false;
+  try {
+    const cfg = JSON.parse(b64dec(decodeURIComponent(m[1])));
+    if (cfg && typeof cfg === "object") {
+      if (cfg.ratio) settings.ratio = cfg.ratio;
+      if (cfg.locations != null) settings.locations = cfg.locations;
+      if (cfg.teiban != null) settings.teiban = cfg.teiban;
+      persist();
+      history.replaceState(null, "", location.pathname);   // リンクから設定を消す
+      return true;
+    }
+  } catch (e) { /* 壊れたリンクは黙って無視し、手入力に任せる */ }
+  return false;
+}
+
+function refreshSetupState() {
+  const n = teibanList().length;
+  const el = document.getElementById("setupState");
+  el.textContent = n ? "　（定番品 " + n + "品目・掛け率 " + settings.ratio + "％）"
+                     : "　⚠ 定番品が未設定です。このままだと全品100%で反映されます";
+  el.style.color = n ? "#666" : "#c05621";
+}
+
+/* ---------- ファイル読み込み（LINEギフトツールと同じ方式） ---------- */
+function parseCSV(text) {
+  const rows = []; let row = [], field = "", inQuotes = false;
+  text = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else { inQuotes = false; } }
+      else field += c;
+    } else if (c === '"') inQuotes = true;
+    else if (c === ",") { row.push(field); field = ""; }
+    else if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
+    else field += c;
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows.filter(r => !(r.length === 1 && r[0] === ""));
+}
+function decodeBytes(buf) {
+  try { return new TextDecoder("utf-8", { fatal: true }).decode(buf); }
+  catch (e) {
+    try { return new TextDecoder("shift-jis").decode(buf); }
+    catch (e2) { return new TextDecoder("utf-8").decode(buf); }
+  }
+}
+async function readTable(file) {
+  const buf = await file.arrayBuffer();
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".xlsx") || name.endsWith(".xlsm")) {
+    const wb = XLSX.read(buf, { type: "array" });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    return XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", raw: false });
+  }
+  let text = decodeBytes(buf);
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  return parseCSV(text);
+}
+
+/* ---------- 列の自動検出 ----------
+   BrewtopeHubの書式が変わっても壊れないよう、見出しの文字で推測し、
+   外れていれば画面で選び直せるようにする（選択はブラウザに記憶される）。 */
+const HUB_FIELDS = [
+  { key: "code",  label: "商品コード",       hints: ["商品コード", "品番"] },
+  { key: "name",  label: "品名",             hints: ["品名", "商品名"] },
+  { key: "pack",  label: "入数",             hints: ["入数"] },
+  { key: "loc",   label: "保管場所",         hints: ["保管場所"] },
+  { key: "stock", label: "在庫数（引当元）",  hints: ["フリー在庫", "free", "出荷可能在庫", "在庫数"] },
+  // 「取置」だけで部分一致させると、見出しが「注意事項メモ ＜完売/先日付/取置/…＞」の
+  // メモ列に誤ヒットする（実データで確認。メモを在庫から引いてしまう事故になる）。
+  // 在庫列だと分かる語を含む見出しだけに限定する
+  { key: "hold",  label: "取り置き在庫（任意）", hints: ["取り置き在庫", "取置在庫", "取り置き数", "取置数"] }
+];
+const BCART_FIELDS = [
+  { key: "code",  label: "品番",      hints: ["【セット】品番", "品番"] },
+  { key: "pname", label: "商品名",    hints: ["【基本】商品名", "商品名"] },
+  { key: "sname", label: "セット名",  hints: ["【セット】セット名", "セット名"] },
+  { key: "stock", label: "セット在庫", hints: ["【セット】在庫", "在庫"] }
+];
+
+function norm(s) { return (s ?? "").toString().normalize("NFKC").replace(/\s+/g, "").toLowerCase(); }
+
+function detect(header, fields, saved) {
+  const H = header.map(norm);
+  const out = {};
+  for (const f of fields) {
+    if (saved && saved[f.key] != null && saved[f.key] < header.length && saved[f.key] >= 0) {
+      out[f.key] = saved[f.key]; continue;
+    }
+    let found = -1;
+    for (const hint of f.hints) {
+      const h = norm(hint);
+      found = H.findIndex(x => x === h);
+      if (found >= 0) break;
+      found = H.findIndex(x => x && x.includes(h));
+      if (found >= 0) break;
+    }
+    out[f.key] = found;
+  }
+  return out;
+}
+
+function mapSelect(prefix, fields, header, current) {
+  let h = '<table style="margin-top:10px"><tr><th style="width:190px">項目</th><th>この列を使う</th></tr>';
+  for (const f of fields) {
+    h += '<tr><td>' + esc(f.label) + '</td><td><select id="' + prefix + '_' + f.key + '" onchange="onMapChange()">';
+    h += '<option value="-1">（使わない）</option>';
+    for (let i = 0; i < header.length; i++) {
+      const name = (header[i] ?? "").toString().replace(/\n/g, " ").trim() || "(列" + colLetter(i) + ")";
+      h += '<option value="' + i + '"' + (current[f.key] === i ? " selected" : "") + ">" +
+           colLetter(i) + "： " + esc(name.slice(0, 40)) + "</option>";
+    }
+    h += "</select></td></tr>";
+  }
+  return h + "</table>";
+}
+function colLetter(i) { let s = ""; i += 1; while (i) { const r = (i - 1) % 26; s = String.fromCharCode(65 + r) + s; i = Math.floor((i - 1) / 26); } return s; }
+
+let hubRows = null, bcartRows = null, hubMap = null, bcartMap = null;
+
+function onMapChange() {
+  for (const f of HUB_FIELDS) {
+    const el = document.getElementById("hub_" + f.key);
+    if (el) hubMap[f.key] = parseInt(el.value, 10);
+  }
+  for (const f of BCART_FIELDS) {
+    const el = document.getElementById("bc_" + f.key);
+    if (el) bcartMap[f.key] = parseInt(el.value, 10);
+  }
+  settings.map = { hub: hubMap, bcart: bcartMap };
+  persist();
+}
+
+/* ---------- 品番の変換（照合シート V列と同じ規則） ---------- */
+function toStockCode(code) {
+  const a = (code ?? "").toString().trim();
+  if (!a) return null;
+  const head = a[0], fifth = a[4];
+  if (head === "4") return a;
+  if (head === "7" || head === "9") return a + "b";
+  if (fifth === "0" || fifth === "1" || fifth === "8") return a + "b";
+  if (fifth === "3" || fifth === "4" || fifth === "5") return a;
+  return null;             // 規則に該当しない＝元のシートでは #N/A になる行
+}
+
+function toNum(v) {
+  const s = (v ?? "").toString().replace(/[,\s]/g, "");
+  if (s === "") return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+/* ---------- 計算 ---------- */
+function compute() {
+  const hub = hubMap, bc = bcartMap;
+  const locs = locationList().map(norm);
+  const teiban = new Set(teibanList().map(s => s.trim()));
+  const ratio = settings.ratio / 100;
+
+  // Bカート側: 品番 -> {現在在庫, 商品名}
+  const bcartIndex = new Map();
+  for (const r of bcartRows.slice(1)) {
+    if (!r || !r.length) continue;
+    const code = (r[bc.code] ?? "").toString().trim();
+    if (!code) continue;
+    const raw = (r[bc.stock] ?? "").toString().trim();
+    // 「1001000b:24」は在庫実体への引当設定。数値だけが実在庫
+    const stock = /^-?\d+$/.test(raw) ? Number(raw) : null;
+    const pname = ((r[bc.pname] ?? "") + " " + (r[bc.sname] ?? "")).trim();
+    if (!bcartIndex.has(code)) bcartIndex.set(code, { stock, pname });
+  }
+
+  // BrewtopeHub側: 行をしぼって品番ごとに合算
+  const sums = new Map();
+  const skipped = { loc: 0, pack: 0, stock: 0 };
+  const unmapped = new Map();
+  let used = 0;
+
+  for (const r of hubRows.slice(1)) {
+    if (!r || !r.length) continue;
+    const code = (r[hub.code] ?? "").toString().trim();
+    if (!code) continue;
+
+    if (locs.length && hub.loc >= 0) {
+      const loc = norm(r[hub.loc]);
+      if (!locs.some(l => loc === l)) { skipped.loc++; continue; }
+    }
+    if (hub.pack >= 0 && (r[hub.pack] ?? "").toString().trim() === "") { skipped.pack++; continue; }
+
+    const base = toNum(r[hub.stock]);
+    if (base === null) { skipped.stock++; continue; }
+    const hold = hub.hold >= 0 ? (toNum(r[hub.hold]) ?? 0) : 0;
+    const free = base - hold;
+
+    const e = sums.get(code) || { code, free: 0, rows: 0, name: (r[hub.name] ?? "").toString().trim() };
+    e.free += free; e.rows++;
+    if (!e.name) e.name = (r[hub.name] ?? "").toString().trim();
+    sums.set(code, e);
+    used++;
+  }
+
+  const items = [], warnings = [];
+  for (const e of sums.values()) {
+    const isTeiban = teiban.has(e.code);
+    const calc = Math.floor(Math.max(0, e.free) * (isTeiban ? ratio : 1));
+    const stockCode = toStockCode(e.code);
+    if (!stockCode) {
+      unmapped.set(e.code, e);
+      warnings.push("商品コード " + e.code + "（" + e.name + "）は品番の変換規則に該当しません。元のシートでも #N/A になる行です");
+      continue;
+    }
+    const b = bcartIndex.get(stockCode);
+    items.push({
+      code: e.code, stockCode, name: e.name,
+      bcartName: b ? b.pname : "", free: e.free, rows: e.rows,
+      isTeiban, calc, newVal: calc,
+      current: b ? b.stock : null,
+      inBcart: !!b,
+      currentIsAlloc: !!b && b.stock === null
+    });
+  }
+  items.sort((a, b2) => a.stockCode.localeCompare(b2.stockCode, "ja"));
+  return { items, warnings, skipped, used, bcartCount: bcartIndex.size, unmapped };
+}
+
+/* ---------- 実行 ---------- */
+async function run() {
+  const hubFile = document.getElementById("hubFile").files[0];
+  const bcartFile = document.getElementById("bcartFile").files[0];
+  const msg = document.getElementById("msg");
+  if (!hubFile || !bcartFile) { msg.innerHTML = '<span class="err">2つのファイルを両方選んでください</span>'; return; }
+  document.getElementById("btnRun").disabled = true;
+  msg.textContent = "読み込み中…";
+  try {
+    if (!hubRows) hubRows = await readTable(hubFile);
+    if (!bcartRows) bcartRows = await readTable(bcartFile);
+    if (!hubRows.length || !bcartRows.length) throw new Error("ファイルが空です");
+    for (const k of ["code", "stock"]) {
+      if (hubMap[k] == null || hubMap[k] < 0) throw new Error("BrewtopeHub側の「" + HUB_FIELDS.find(f => f.key === k).label + "」の列を選んでください");
+      if (bcartMap[k] == null || bcartMap[k] < 0) throw new Error("Bカート側の「" + BCART_FIELDS.find(f => f.key === k).label + "」の列を選んでください");
+    }
+    state = compute();
+    render();
+    msg.textContent = "";
+  } catch (e) {
+    msg.innerHTML = '<span class="err">' + esc(e.message || String(e)) + "</span>";
+  } finally {
+    document.getElementById("btnRun").disabled = false;
+  }
+}
+
+async function onFilePicked(which) {
+  const el = document.getElementById(which === "hub" ? "hubFile" : "bcartFile");
+  const file = el.files[0];
+  if (!file) return;
+  try {
+    const rows = await readTable(file);
+    if (which === "hub") { hubRows = rows; hubMap = detect(rows[0] || [], HUB_FIELDS, (settings.map || {}).hub); }
+    else { bcartRows = rows; bcartMap = detect(rows[0] || [], BCART_FIELDS, (settings.map || {}).bcart); }
+    renderMap();
+  } catch (e) {
+    document.getElementById("msg").innerHTML = '<span class="err">' + esc(e.message) + "</span>";
+  }
+}
+
+function renderMap() {
+  let h = "";
+  if (hubRows) {
+    h += '<details open><summary>BrewtopeHub の列（自動で推測しています。違っていれば選び直してください）</summary>'
+      + mapSelect("hub", HUB_FIELDS, hubRows[0] || [], hubMap) + "</details>";
+  }
+  if (bcartRows) {
+    h += '<details><summary>Bカート の列</summary>'
+      + mapSelect("bc", BCART_FIELDS, bcartRows[0] || [], bcartMap) + "</details>";
+  }
+  const miss = [];
+  if (hubRows && hubMap) for (const f of HUB_FIELDS) if (f.key !== "hold" && f.key !== "name" && hubMap[f.key] < 0) miss.push("BrewtopeHub／" + f.label);
+  if (bcartRows && bcartMap) for (const f of BCART_FIELDS) if (f.key !== "pname" && f.key !== "sname" && bcartMap[f.key] < 0) miss.push("Bカート／" + f.label);
+  if (miss.length) h += '<div class="warnbox">自動で見つけられなかった列があります。上で選んでください：' + esc(miss.join("、")) + "</div>";
+  document.getElementById("mapArea").innerHTML = h;
+}
+
+function esc(s) { const d = document.createElement("div"); d.textContent = s ?? ""; return d.innerHTML; }
+
+function onEdit(i, el) {
+  const v = parseInt(el.value, 10);
+  state.items[i].newVal = Number.isFinite(v) && v >= 0 ? v : 0;
+  el.classList.toggle("edited", state.items[i].newVal !== state.items[i].calc);
+  updateSummary();
+}
+function resetOne(i) {
+  state.items[i].newVal = state.items[i].calc;
+  const el = document.getElementById("v" + i);
+  el.value = state.items[i].calc; el.classList.remove("edited");
+  updateSummary();
+}
+function updateSummary() {
+  const edited = state.items.filter(x => x.newVal !== x.calc).length;
+  const el = document.getElementById("editedCount");
+  if (el) el.textContent = edited ? "手修正 " + edited + "件" : "手修正なし";
+}
+
+function render() {
+  const d = state;
+  const notInBcart = d.items.filter(x => !x.inBcart);
+  const allocOnly = d.items.filter(x => x.inBcart && x.currentIsAlloc);
+  let h = '<div class="card">';
+  h += '<span class="badge b-ok">更新対象 ' + d.items.length + "品番</span>";
+  h += '<span class="badge b-info" id="editedCount">手修正なし</span>';
+  if (notInBcart.length) h += '<span class="badge b-miss">Bカートに無い ' + notInBcart.length + "</span>";
+  if (d.warnings.length) h += '<span class="badge b-warn">要確認 ' + d.warnings.length + "</span>";
+  h += '<div class="hint">BrewtopeHub：' + d.used + "行を採用（保管場所で除外 " + d.skipped.loc +
+       "／入数が空で除外 " + d.skipped.pack + "／在庫が数値でなく除外 " + d.skipped.stock +
+       "）　Bカート：" + d.bcartCount + "品番を読み込み</div>";
+
+  h += '<div><button class="btnDownload" onclick="downloadCSV()">📥 在庫更新CSVをダウンロード</button>'
+     + '<button class="btnSub" onclick="copyTable()">表をコピー（雛形に貼る用）</button>'
+     + '<label style="display:inline-block;font-weight:400;margin-left:8px"><input type="checkbox" id="withHeader" checked> 見出し行を含める</label></div>';
+
+  if (d.warnings.length) {
+    h += '<div class="warnbox"><b>確認してください</b><ul style="margin:6px 0 0 18px;padding:0">';
+    for (const w of d.warnings.slice(0, 20)) h += "<li>" + esc(w) + "</li>";
+    if (d.warnings.length > 20) h += "<li>ほか " + (d.warnings.length - 20) + "件</li>";
+    h += "</ul></div>";
+  }
+  if (allocOnly.length) {
+    h += '<div class="warnbox">' + allocOnly.length + '品番は、Bカート側の在庫欄が「引当設定（例 1001000b:24）」でした。'
+       + '現在庫の比較はできませんが、更新は行えます。</div>';
+  }
+
+  h += '<div class="scroll"><table><tr>'
+     + "<th>品番（Bカート）</th><th>品名</th><th class='num'>フリー在庫</th><th>区分</th>"
+     + "<th class='num'>現在</th><th class='num'>新在庫</th><th class='num'>差</th><th></th></tr>";
+  d.items.forEach((x, i) => {
+    const cls = [];
+    if (!x.inBcart) cls.push("nomatch");
+    const diff = (x.current === null) ? "" : (x.newVal - x.current);
+    h += '<tr class="' + cls.join(" ") + '">'
+      + "<td>" + esc(x.stockCode) + (x.stockCode !== x.code ? '<span class="hint"> ←' + esc(x.code) + "</span>" : "") + "</td>"
+      + "<td>" + esc(x.bcartName || x.name) + "</td>"
+      + '<td class="num">' + x.free + (x.rows > 1 ? '<span class="hint">(' + x.rows + "行)</span>" : "") + "</td>"
+      + "<td>" + (x.isTeiban ? "定番 " + settings.ratio + "％" : "100％") + "</td>"
+      + '<td class="num">' + (x.current === null ? (x.inBcart ? "—" : "<span class='err'>無し</span>") : x.current) + "</td>"
+      + '<td class="num newv"><input type="number" id="v' + i + '" value="' + x.newVal + '" min="0" style="width:88px" onchange="onEdit(' + i + ',this)"></td>'
+      + '<td class="num">' + (diff === "" ? "" : (diff > 0 ? "+" + diff : diff)) + "</td>"
+      + '<td><button class="btnSub" style="margin:0;padding:2px 8px" onclick="resetOne(' + i + ')">戻す</button></td>'
+      + "</tr>";
+  });
+  h += "</table></div></div>";
+  document.getElementById("result").innerHTML = h;
+}
+
+/* ---------- 出力 ---------- */
+function outRows() {
+  const rows = [];
+  if (document.getElementById("withHeader").checked) rows.push(["【セット】品番", "【セット】在庫", "【セット】在庫制限"]);
+  for (const x of state.items) rows.push([x.stockCode, String(x.newVal), ""]);
+  return rows;
+}
+function stamp() {
+  const d = new Date(), p = n => String(n).padStart(2, "0");
+  return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate());
+}
+function downloadCSV() {
+  const csv = outRows().map(r => r.map(c => /[",\n]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c).join(",")).join("\r\n");
+  // ExcelでもBカートでも文字化けしないようBOM付きUTF-8で出す
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "在庫更新" + stamp() + ".csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+function copyTable() {
+  const tsv = outRows().map(r => r.join("\t")).join("\n");
+  navigator.clipboard.writeText(tsv).then(
+    () => alert("コピーしました。Bカートの在庫インポート雛形に貼り付けてください。"),
+    () => alert("コピーできませんでした。CSVダウンロードをお使いください。"));
+}
+
+/* ---------- 起動 ---------- */
+const fromLink = applyLinkSettings();
+document.getElementById("ratio").value = settings.ratio;
+document.getElementById("locations").value = settings.locations;
+document.getElementById("teiban").value = settings.teiban;
+refreshSetupState();
+if (fromLink) document.getElementById("setupMsg").textContent = "リンクの設定を読み込みました（定番品 " + teibanList().length + "品目・掛け率 " + settings.ratio + "％）";
+if (!teibanList().length) document.getElementById("setupBox").open = true;
+document.getElementById("hubFile").addEventListener("change", () => { hubRows = null; onFilePicked("hub"); });
+document.getElementById("bcartFile").addEventListener("change", () => { bcartRows = null; onFilePicked("bcart"); });
+</script>
+</body>
+</html>
